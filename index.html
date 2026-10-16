@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>MusicPad</title>
+<style>
+  :root {
+    --bg: #faf8f3;
+    --ink: #1a1a1a;
+    --accent: #2a6df4;
+    --muted: #999;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overscroll-behavior: none;
+  }
+  header {
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #e6e2d8;
+    background: #fff;
+    position: sticky; top: 0; z-index: 10;
+  }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  button {
+    font: inherit;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid #d8d3c7;
+    background: #fff;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  button:active { background: #eee9dc; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:active { background: #1e5ad4; }
+  .durations { display: flex; gap: 6px; }
+  .durations button.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+  main {
+    padding: 16px;
+    display: flex; justify-content: center;
+  }
+  #staffWrap {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    padding: 8px;
+    touch-action: none;
+    max-width: 100%;
+  }
+  #staff { touch-action: none; display: block; }
+  .hint { color: var(--muted); font-size: 13px; padding: 0 16px 24px; text-align: center; }
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MusicPad</h1>
+  <div class="durations" id="durations">
+    <button data-dur="w">𝅝</button>
+    <button data-dur="h">𝅗𝅥</button>
+    <button data-dur="q" class="selected">♩</button>
+    <button data-dur="8">♪</button>
+  </div>
+  <div class="spacer"></div>
+  <button id="playBtn" class="primary">▶ Play</button>
+  <button id="exportBtn">Export</button>
+  <button id="clearBtn">Clear</button>
+</header>
+
+<main>
+  <div id="staffWrap">
+    <div id="staff"></div>
+  </div>
+</main>
+
+<p class="hint">Tap a line or space to add a note. Drag a note up/down to change pitch. Tap a note, then pick a duration up top.</p>
+
+<!-- VexFlow -->
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
+<!-- Tone.js -->
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
+<!-- MusicXML writer (tiny helper lib) -->
+<script src="https://cdn.jsdelivr.net/npm/musicxml-writer@0.1.0/musicxml-writer.js"></script>
+
+<script>
+/* ============================================================
+   MusicPad — v1
+   Tap to add notes, drag to change pitch, buttons for duration.
+   Playback through sampled piano (Tone.js Sampler).
+   Export to MusicXML.
+   ============================================================ */
+
+const VF = Vex.Flow;
+
+/* ---------- Staff geometry ----------
+   We draw a grand staff: treble on top, bass below.
+   Staff lines are 10px apart. A "step" (line-to-line or
+   space-to-space) is 5px = half a line gap.                */
+
+const LINE_GAP = 12;          // px between staff lines
+const STEP = LINE_GAP / 2;    // half-gap = one diatonic step
+const STAFF_WIDTH = 620;      // render width
+const TREBLE_TOP = 40;        // y of top line of treble staff
+const BASS_TOP   = 200;       // y of top line of bass staff
+
+/* Diatonic steps from a reference note.
+   We use "letter index" where C=0, D=1, E=2, F=3, G=4, A=5, B=6.
+   Each note is (letter, octave). Position on staff derives from these. */
+
+const LETTERS = ['c','d','e','f','g','a','b'];
+const LETTER_TO_SEMITONE = { c:0, d:2, e:4, f:5, g:7, a:9, b:11 };
+
+// VexFlow key names use lowercase letters + accidentals; we keep naturals only in v1.
+function vfKey(letter, octave) { return letter + '/' + octave; }
+
+// Absolute diatonic index (each +1 = one step up on the staff)
+function diatonicIndex(letter, octave) {
+  return octave * 7 + LETTERS.indexOf(letter);
+}
+
+/* Reference points (top line of each staff) in diatonic terms:
+   Treble top line = F5.  Bass top line = A3.  */
+const TREBLE_REF = { letter:'f', octave:5 };
+const BASS_REF   = { letter:'a', octave:3 };
+
+/* Given a y-pixel and which staff it's on, return nearest
+   diatonic position (integer number of steps below top line). */
+function yToSteps(y, staffTopY) {
+  return Math.round((y - staffTopY) / STEP);
+}
+function stepsToY(steps, staffTopY) {
+  return staffTopY + steps * STEP;
+}
+
+/* Convert (staff, steps-below-top-line) <-> (letter, octave) */
+function refToLetterOctave(ref, steps) {
+  let idx = diatonicIndex(ref.letter, ref.octave) - steps;
+  const octave = Math.floor(idx / 7);
+  const letter = LETTERS[((idx % 7) + 7) % 7];
+  return { letter, octave };
+}
+function letterOctaveToSteps(ref, letter, octave) {
+  return diatonicIndex(ref.letter, ref.octave) - diatonicIndex(letter, octave);
+}
+
+/* ---------- App state ---------- */
+
+// notes: [{ id, letter, octave, dur, staff }]  staff = 'treble'|'bass'
+let notes = [];
+let selectedId = null;
+let nextId = 1;
+let currentDuration = 'q';
+
+/* ---------- Render with VexFlow ---------- */
+
+const renderer = new VF.Renderer(document.getElementById('staff'), VF.Renderer.Backends.SVG);
+const HEIGHT = 300;
+renderer.resize(STAFF_WIDTH, HEIGHT);
+const ctx = renderer.getContext();
+
+function drawStaff() {
+  ctx.clear();
+  const width = STAFF_WIDTH;
+
+  // Treble staff
+  const treble = new VF.Stave(10, TREBLE_TOP, width - 20);
+  treble.addClef('treble').addTimeSignature('4/4');
+  treble.setContext(ctx).draw();
+
+  // Bass staff
+  const bass = new VF.Stave(10, BASS_TOP, width - 20);
+  bass.addClef('bass').addTimeSignature('4/4');
+  bass.setContext(ctx).draw();
+
+  // Connector between staves (grand staff brace)
+  const connector = new VF.StaveConnector(treble, bass);
+  connector.setType(VF.StaveConnector.type.BRACE);
+  connector.setContext(ctx).draw();
+  const line = new VF.StaveConnector(treble, bass);
+  line.setType(VF.StaveConnector.type.SINGLE_LEFT);
+  line.setContext(ctx).draw();
+
+  // Render notes as a single voice per staff (v1 simplification)
+  const trebleNotes = notes.filter(n => n.staff === 'treble');
+  const bassNotes   = notes.filter(n => n.staff === 'bass');
+
+  renderVoice(trebleNotes, treble, TREBLE_REF);
+  renderVoice(bassNotes,   bass,   BASS_REF);
+}
+
+function renderVoice(list, stave, ref) {
+  if (list.length === 0) return;
+
+  const vfNotes = list.map(n => {
+    const key = vfKey(n.letter, n.octave);
+    const isSelected = n.id === selectedId;
+    const staveNote = new VF.StaveNote({
+      clef: stave.getClef(),
+      keys: [key],
+      duration: n.dur,
+    });
+    if (isSelected) staveNote.setStyle({ fillStyle: '#2a6df4', strokeStyle: '#2a6df4' });
+    return staveNote;
+  });
+
+  // v1: no auto-beaming; simplest reliable rendering.
+  const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
+  voice.addTickables(vfNotes);
+
+  new VF.Formatter().joinVoices([voice]).format([voice], stave.getNoteEndX() - stave.getNoteStartX() - 30);
+  voice.draw(ctx, stave);
+}
+
+/* ---------- Note lookup from tap ---------- */
+
+const staffEl = document.getElementById('staff');
+
+function pointToStaff(x, y) {
+  // Which staff did they tap? Use nearest staff's vertical center.
+  const trebleCenter = TREBLE_TOP + LINE_GAP * 2;
+  const bassCenter   = BASS_TOP   + LINE_GAP * 2;
+  const distT = Math.abs(y - trebleCenter);
+  const distB = Math.abs(y - bassCenter);
+  const staff = distT <= distB ? 'treble' : 'bass';
+  const topY  = staff === 'treble' ? TREBLE_TOP : BASS_TOP;
+  const ref   = staff === 'treble' ? TREBLE_REF : BASS_REF;
+
+  let steps = yToSteps(y, topY);
+  // Clamp to a sensible range so notes don't fly off the staff
+  steps = Math.max(-4, Math.min(14, steps));
+
+  const { letter, octave } = refToLetterOctave(ref, steps);
+  return { staff, letter, octave, steps };
+}
+
+/* Which note is under (x, y)? We approximate by diatonic position and x-proximity.
+   VexFlow doesn't give us note bounding boxes easily in SOFT mode, so we
+   recompute expected x positions ourselves. */
+function findNoteAt(x, y) {
+  // Determine staff + steps from y
+  const { staff, steps } = pointToStaff(x, y);
+
+  // Search notes on that staff within 1 step and 20px x
+  let best = null, bestDist = Infinity;
+  for (const n of notes) {
+    if (n.staff !== staff) continue;
+    const ref = staff === 'treble' ? TREBLE_REF : BASS_REF;
+    const nSteps = letterOctaveToSteps(ref, n.letter, n.octave);
+    const dy = Math.abs(nSteps - steps);
+    if (dy > 1) continue;
+    // x is approximate; we scan by index position
+    const dx = Math.abs((n._lastX ?? -9999) - x);
+    if (dx < 30 && dx < bestDist) { best = n; bestDist = dx; }
+  }
+  return best;
+}
+
+/* We need x positions to hit-test notes. Patch renderVoice to
+   record each note's x on the note object. */
+const originalRenderVoice = renderVoice;
+renderVoice = function(list, stave, ref) {
+  if (list.length === 0) return;
+
+  const vfNotes = list.map(n => {
+    const key = vfKey(n.letter, n.octave);
+    const isSelected = n.id === selectedId;
+    const staveNote = new VF.StaveNote({
+      clef: stave.getClef(),
+      keys: [key],
+      duration: n.dur,
+    });
+    if (isSelected) staveNote.setStyle({ fillStyle: '#2a6df4', strokeStyle: '#2a6df4' });
+    return staveNote;
+  });
+
+  const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
+  voice.addTickables(vfNotes);
+
+  new VF.Formatter().joinVoices([voice]).format([voice], stave.getNoteEndX() - stave.getNoteStartX() - 30);
+  voice.draw(ctx, stave);
+
+  // Record x positions for hit-testing
+  vfNotes.forEach((vn, i) => {
+    try {
+      const bb = vn.getBoundingBox();
+      list[i]._lastX = bb.getX() + bb.getW() / 2;
+    } catch (e) {
+      // fallback: distribute evenly
+      const startX = stave.getNoteStartX() + 20;
+      const span = stave.getNoteEndX() - stave.getNoteStartX() - 40;
+      list[i]._lastX = startX + (list.length === 1 ? 0 : (i', / (list.length - 1)) ' * span);
+    }
+  });
+D};
+
+/* ---------- Pointer handling (Pencil + finger + mouse) ---------- */
+
+let dragState = null;   // { note, startY, startSteps, staff }
+
+staffEl.addEventListener('pointerdown', (e) => {
+  const rect = staffEl.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  const hit = findNoteAt(x, y);
+  if (hit) {
+    selectedId = hit.id;
+    const ref = hit.staff === 'treble' ? TREBLE_REF : BASS_REF;
+    dragState = {
+      note: hit,
+      startY: y,
+      startSteps: letterOctaveToSteps(ref, hit.letter, hit.octave),
+    };
+    drawStaff();
+    staffEl.setPointerCapture(e.pointerId);
+  }
+});
+
+staffEl.addEventListener('pointermove', (e) => {
+  if (!dragState) return;
+  const rect = staffEl.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  const { note, startY, startSteps } = dragState;
+  const deltaSteps = Math.round((y - startY) / STEP);
+  const newSteps = startSteps + deltaSteps;
+  const ref = note.staff === 'treble' ? TREBLE_REF : BASS_REF;
+  const { letter, octave } = refToLetterOctave(ref, Math.max(-4, Math.min(14, newSteps)));
+  note.letter = letter;
+  note.octave = octave;
+  drawStaff();
+});
+
+staffEl.addEventListener('pointerup', (e) => {
+  if (dragState) {
+    // If they barely moved, treat as a tap to select/deselect (already done on down)
+    dragState = null;
+    try { staffEl.releasePointerCapture(e.pointerId); } catch (_) {}
+  } else {
+    // Was this a tap on empty staff? Add a note.
+    const rect = staffEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // Ignore if they tapped on the clef area
+    if (x < 90) return;
+    const { staff, letter, octave } = pointToStaff(x, y);
+    const newNote = { id: nextId++, letter, octave, dur: currentDuration, staff };
+    notes.push(newNote);
+    selectedId = newNote.id;
+    drawStaff();
+  }
+});
+
+/* Prevent scrolling while dragging on the canvas */
+staffEl.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+
+/* ---------- Duration buttons ---------- */
+
+document.getElementById('durations').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  currentDuration = btn.dataset.dur;
+  document.querySelectorAll('#durations button').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  if (selectedId) {
+    const n = notes.find(n => n.id === selectedId);
+    if (n) { n.dur = currentDuration; drawStaff(); }
+  }
+});
+
+/* ---------- Clear ---------- */
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  notes = [];
+  selectedId = null;
+  drawStaff();
+});
+
+/* ---------- Audio: sampled acoustic piano via Tone.js ---------- */
+
+let sampler = null;
+let samplerReady = false;
+
+// Salamander Grand Piano samples (public domain, hosted by Tone.js)
+const PIANO_SAMPLES = {
+  'A0': 'A0.mp3', 'C1': 'C1.mp3#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3',
+  'A1': 'A1.mp3', 'C2': 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3',
+  'A2': 'A2.mp3', 'C3': 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3',
+  'A3': 'A3.mp3', 'C4': 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3',
+  'A4': 'A4.mp3', 'C5': 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3',
+  'A5': 'A5.mp3', 'C6': 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3',
+  'A6': 'A6.mp3', 'C7': 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3',
+  'A7': 'A7.mp3', 'C8': 'C8.mp3'
+};
+const SAMPLE_BASE = 'https://tonejs.github.io/audio/salamander/';
+
+async function ensureSampler() {
+  if (sampler) return sampler;
+  const urls = {};
+  for (const [note, file] of Object.entries(PIANO_SAMPLES)) {
+    urls[note] = SAMPLE_BASE + file;
+  }
+  sampler = new Tone.Sampler({
+    urls,
+    release: 1,
+    baseUrl: '',
+    onload: () => { samplerReady = true; }
+  }).toDestination();
+  await Tone.loaded();
+  samplerReady = true;
+  return sampler;
+}
+
+/* Map (letter, octave) -> scientific pitch name with sharps where needed.
+   We only use naturals in v1, so this is simple. */
+function toPitchName(letter, octave) {
+  // Tone.js uses e.g. "C4", "F#5". Naturals only here.
+  return letter.toUpperCase() + octave;
+}
+
+/* Duration in seconds for our durations at 90 BPM */
+const BPM = 90;
+const beatSec = 60 / BPM;   // quarter note
+function durationSeconds(dur) {
+  switch (dur) {
+    case 'w': return beatSec * 4;
+    case 'h': return beatSec * 2;
+    case 'q': return beatSec;
+    case '8': return beatSec / 2;
+    default:  return beatSec;
+  }
+}
+
+document.getElementById('playBtn').addEventListener('click', async () => {
+  if (notes.length === 0) return;
+  await Tone.start();
+  await ensureSampler();
+
+  // Sort notes by staff then by their on-screen order (which is insertion order)
+  // For v1 we simply play them in the order they were added.
+  const seq = notes.slice();
+
+  // Group into "chords" if multiple notes share the same step index? v1: melodic only.
+  let t = Tone.now() + 0.1;
+  for (const n of seq) {
+    const pitch = toPitchName(n.letter, n.octave);
+    const dur = durationSeconds(n.dur);
+    try {
+      sampler.triggerAttackRelease(pitch, dur * 0.95, t);
+    } catch (e) {
+      console.warn('Could not play', pitch, e);
+    }
+    t += dur;
+  }
+});
+
+/* ---------- Export MusicXML ---------- */
+
+function exportMusicXML() {
+  // We build a minimal MusicXML part-wise score.
+  // Treble and bass are two separate <part> elements.
+  const div = 4; // divisions per quarter note
+
+  function durationToDivisions(dur) {
+    switch (dur) {
+      case 'w': return div * 4;
+      case 'h': return div * 2;
+      case 'q': return div;
+      case '8': return div / 2;
+      default:  return div;
+    }
+  }
+  function typeForDur(dur) {
+    return { w: 'whole', h: 'half', q: 'quarter', '8': 'eighth' }[dur] || 'quarter';
+  }
+  function stepOctave(n) {
+    return { step: n.letter.toUpperCase(), octave: n.octave, alter: 0 };
+  }
+
+  const parts = ['treble', 'bass'].map((staffName, i) => {
+    const partId = 'P' + (i + 1);
+    const clefSign = staffName === 'treble' ? 'G' : 'F';
+    const clefLine = staffName === 'treble' ? 2 : 4;
+    const list = + notes.filter(n => n.staff === staffName);
+     const measures = [];
+    // v11: pack notes into 4/4 measures} greedily by divisions
+    const measureCap = div"> * 4;
+    let current = [];
+    let used =${ 0;
+    for (const n of list) {
+      const d = durationToDivisions(n.dur);
+      if (used + d > measureCap && current.length > 0) {
+        measures.push(current); current = []; used = 0;
+      }
+      current.push(n);
+      used += d;
+    }
+    if (current.length > 0 || measures.length === 0) measures.push(current);
+
+    const measuresXML = measures.map((mNotes, mi) => {
+      const attrs = mi === 0 ? `
+        <attributes>
+          <divisions>${div}</divisions>
+          <key><fifths>0</fifths></key>
+          <time><beats>4</beats><beat-type>4</beat-type></time>
+          <clef><sign>${clefSign}</sign><line>${clefLine}</line></clef>
+        </attributes>` : '';
+      const noteXML = mNotes.map(n => {
+        const { step, octave, alter } = stepOctave(n);
+        return `<note>
+          <pitch><step>${step}</step><alter>${alter}</alter><octave>${octave}</octave></pitch>
+          <duration>${durationToDivisions(n.dur)}</duration>
+          <type>${typeForDur(n.dur)}</type>
+        </note>`;
+      }).join('\n');
+      // Pad to full measure with a rest if short
+      const usedDiv = mNotes.reduce((s, n) => s + durationToDivisions(n.dur), 0);
+      const restDiv = measureCap - usedDiv;
+      const restXML = restDiv > 0 ? `<note><rest/><duration>${restDiv}</duration><type>whole</type></note>` : '';
+      return `<measure number="${miattrs}\n${noteXML}\n${restXML}\n</measure>`;
+    }).join('\n');
+
+    return `<part id="${partId}">\n${measuresXML}\n</part>`;
+  }).join('\n');
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1"><part-name>Treble</part-name></score-part>
+    <score-part id="P2"><part-name>Bass</part-name></score-part>
+  </part-list>
+  ${parts}
+</score-partwise>`;
+
+  const blob = new Blob([xml], { type: 'application/vnd.recordare.musicxml+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'musicpad.musicxml';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('exportBtn').addEventListener('click', exportMusicXML);
+
+/* ---------- Initial draw ---------- */
+
+drawStaff();
+
+</script>
+</body>
+</html>
