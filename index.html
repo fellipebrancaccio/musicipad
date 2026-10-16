@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<title>MusicPad</title>
+<title>MusicPad V0.1</title>
 <style>
   :root {
     --bg: #faf8f3;
@@ -18,58 +18,52 @@
     background: var(--bg); color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     overscroll-behavior: none;
+    height: 100%;
   }
   header {
-    padding: 10px 12px;
-    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    display: flex; align-items: center; gap: 6px;
     flex-wrap: wrap;
     border-bottom: 1px solid #e6e2d8;
     background: #fff;
-    position: sticky; top: 0; z-index: 10;
   }
-  h1 { font-size: 17px; margin: 0 6px 0 0; font-weight: 600; }
+  h1 { font-size: 15px; margin: 0 4px 0 0; font-weight: 600; }
   button {
     font: inherit;
-    padding: 8px 12px;
+    padding: 7px 11px;
     border-radius: 8px;
     border: 1px solid #d8d3c7;
     background: #fff;
     cursor: pointer;
-    min-height: 40px;
+    min-height: 38px;
     color: var(--ink);
   }
   button:active { background: #eee9dc; }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   button.primary:active { background: #1e5ad4; }
-  .durations { display: flex; gap: 6px; }
-  .durations button { min-width: 44px; }
+  .durations { display: flex; gap: 4px; }
+  .durations button { min-width: 42px; }
   .durations button.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
-  main {
-    padding: 12px;
-    display: flex; justify-content: center;
-  }
+  .spacer { flex: 1; }
   #staffWrap {
     background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-    padding: 6px;
+    margin: 8px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    padding: 4px;
     touch-action: none;
-    width: 100%;
-    max-width: 900px;
     overflow: hidden;
   }
   #staff { touch-action: none; display: block; width: 100%; }
-  .hint { color: var(--muted); font-size: 13px; padding: 0 16px 24px; text-align: center; }
-  .spacer { flex: 1; }
+  .hint { color: var(--muted); font-size: 12px; padding: 0 12px 16px; text-align: center; }
   #err {
     display: none;
-    margin: 12px;
-    padding: 12px;
-    background: #fee;
-    color: #900;
+    margin: 8px;
+    padding: 10px;
+    background: #fee; color: #900;
     border-radius: 8px;
     font-family: ui-monospace, Menlo, monospace;
-    font-size: 12px;
+    font-size: 11px;
     white-space: pre-wrap;
   }
 </style>
@@ -77,7 +71,7 @@
 <body>
 
 <header>
-  <h1>MusicPad</h1>
+  <h1>MusicPad <span style="color:var(--muted);font-weight:400">V0.1</span></h1>
   <div class="durations" id="durations">
     <button data-dur="w">𝅝</button>
     <button data-dur="h">𝅗𝅥</button>
@@ -85,20 +79,18 @@
     <button data-dur="8">♪</button>
   </div>
   <div class="spacer"></div>
-  <button id="playBtn" class="primary">▶ Play</button>
+  <button id="playBtn" class="primary">▶</button>
   <button id="exportBtn">Export</button>
   <button id="clearBtn">Clear</button>
 </header>
 
 <div id="err"></div>
 
-<main>
-  <div id="staffWrap">
-    <div id="staff"></div>
-  </div>
-</main>
+<div id="staffWrap">
+  <div id="staff"></div>
+</div>
 
-<p class="hint">Tap a line or space to add a note. Drag a note up/down to change pitch. Tap a note, then pick a duration up top.</p>
+<p class="hint">Toca numa linha ou espaço pra criar nota. Arrasta a nota pra cima/baixo pra mudar a altura. Toca na nota, depois escolhe a duração lá em cima.</p>
 
 <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tone@14.8.49/build/Tone.js"></script>
@@ -108,210 +100,299 @@
   'use strict';
 
   function showError(msg) {
-    const el = document.getElementById('err');
+    var el = document.getElementById('err');
     el.style.display = 'block';
     el.textContent += msg + '\n';
   }
-  window.addEventListener('error', e => showError('JS error: ' + (e.message || e)));
+  window.addEventListener('error', function (e) {
+    showError('JS error: ' + (e.message || e));
+  });
 
-  if (typeof Vex === 'undefined') { showError('VexFlow did not load. Check internet connection and reload.'); return; }
-  if (typeof Tone === 'undefined') { showError('Tone.js did not load. Audio playback will not work.'); }
+  if (typeof Vex === 'undefined') { showError('VexFlow não carregou. Confere a internet e recarrega.'); return; }
+  if (typeof Tone === 'undefined') { showError('Tone.js não carregou. O Play não vai funcionar.'); }
 
-  const VF = Vex.Flow;
+  var VF = Vex.Flow;
 
-  /* ---------------- geometry ---------------- */
-  const LINE_GAP = 12;
-  const STEP = LINE_GAP / 2;
-  const TREBLE_TOP = 46;
-  const BASS_TOP   = 210;
+  /* =========================================================
+     GEOMETRIA DO PENTAGRAMA
+     ========================================================= */
+  var LINE_GAP = 14;          // espaço entre linhas
+  var STEP = LINE_GAP / 2;    // meio espaço = um grau diatônico
+  var TREBLE_TOP = 60;
+  var BASS_TOP   = 260;
+  var HEIGHT     = 380;
 
-  const LETTERS = ['c','d','e','f','g','a','b'];
-  const TREBLE_REF = { letter: 'f', octave: 5 };
-  const BASS_REF   = { letter: 'a', octave: 3 };
+  var LETTERS = ['c','d','e','f','g','a','b'];
+  var LETTER_PT = { c:'Dó', d:'Ré', e:'Mi', f:'Fá', g:'Sol', a:'Lá', b:'Si' };
+  var TREBLE_REF = { letter:'f', octave:5 };
+  var BASS_REF   = { letter:'a', octave:3 };
 
   function diatonicIndex(letter, octave) {
     return octave * 7 + LETTERS.indexOf(letter);
   }
   function refToLetterOctave(ref, steps) {
-    const idx = diatonicIndex(ref.letter, ref.octave) - steps;
-    const octave = Math.floor(idx / 7);
-    const letter = LETTERS[((idx % 7) + 7) % 7];
-    return { letter, octave };
+    var idx = diatonicIndex(ref.letter, ref.octave) - steps;
+    var octave = Math.floor(idx / 7);
+    var letter = LETTERS[((idx % 7) + 7) % 7];
+    return { letter: letter, octave: octave };
   }
   function letterOctaveToSteps(ref, letter, octave) {
     return diatonicIndex(ref.letter, ref.octave) - diatonicIndex(letter, octave);
   }
 
-  /* ---------------- state ---------------- */
-  let notes = [];          // { id, letter, octave, dur, staff }
-  let selectedId = null;
-  let nextId = 1;
-  let currentDuration = 'q';
+  /* =========================================================
+     ESTADO
+     ========================================================= */
+  var notes = [];          // { id, letter, octave, dur, staff, accidental }
+  var selectedId = null;
+  var nextId = 1;
+  var currentDuration = 'q';
 
-  /* ---------------- VexFlow setup ---------------- */
-  const staffDiv = document.getElementById('staff');
-  let renderer = null;
-  let ctx = null;
-  let STAFF_WIDTH = 660;
-  const HEIGHT = 320;
+  /* =========================================================
+     VEXFLOW — SETUP
+     ========================================================= */
+  var staffDiv = document.getElementById('staff');
+  var ctx = null;
+  var STAFF_WIDTH = 700;
+  var staveTreble = null;
+  var staveBass = null;
 
   function buildRenderer() {
     staffDiv.innerHTML = '';
-    const wrapW = document.getElementById('staffWrap').clientWidth - 12;
-    STAFF_WIDTH = Math.max(320, Math.min(900, wrapW));
-    renderer = new VF.Renderer(staffDiv, VF.Renderer.Backends.SVG);
+    var wrap = document.getElementById('staffWrap');
+    var wrapW = wrap.clientWidth - 8;
+    STAFF_WIDTH = Math.max(320, wrapW);
+
+    var renderer = new VF.Renderer(staffDiv, VF.Renderer.Backends.SVG);
     renderer.resize(STAFF_WIDTH, HEIGHT);
     ctx = renderer.getContext();
-    staffDiv.querySelector('svg').style.width = '100%';
-    staffDiv.querySelector('svg').style.height = HEIGHT + 'px';
-    staffDiv.style.height = HEIGHT + 'px';
+
+    var svg = staffDiv.querySelector('svg');
+    svg.style.width = '100%';
+    svg.style.height = HEIGHT + 'px';
+    svg.setAttribute('viewBox', '0 0 ' + STAFF_WIDTH + ' ' + HEIGHT);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   }
 
-  function computeNoteX(stave, list, i) {
-    // Mirror VexFlow's linear distribution for our uniform noteheads.
-    const startX = stave.getNoteStartX() + 24;
-    const endX = stave.getNoteEndX() - 20;
-    const span = Math.max(40, endX - startX);
-    if (list.length <= 1) return startX;
-    return startX + (span * i) / (list.length - 1);
-  }
-
+  /* =========================================================
+     DESENHO
+     ========================================================= */
   function drawStaff() {
     if (!ctx) return;
     try {
-      // clear by removing children (VexFlow SVG ctx.clear is unreliable on Safari)
-      const svg = staffDiv.querySelector('svg');
-      if (svg) while (svg.firstChild) svg.removeChild(svg.firstChild);
+      var svg = staffDiv.querySelector('svg');
+      if (svg) { while (svg.firstChild) svg.removeChild(svg.firstChild); }
 
-      const treble = new VF.Stave(10, TREBLE_TOP, STAFF_WIDTH - 20);
-      treble.addClef('treble').addTimeSignature('4/4');
-      treble.setContext(ctx).draw();
+      staveTreble = new VF.Stave(10, TREBLE_TOP, STAFF_WIDTH - 20);
+      staveTreble.addClef('treble').addTimeSignature('4/4');
+      staveTreble.setContext(ctx).draw();
 
-      const bass = new VF.Stave(10, BASS_TOP, STAFF_WIDTH - 20);
-      bass.addClef('bass').addTimeSignature('4/4');
-      bass.setContext(ctx).draw();
+      staveBass = new VF.Stave(10, BASS_TOP, STAFF_WIDTH - 20);
+      staveBass.addClef('bass').addTimeSignature('4/4');
+      staveBass.setContext(ctx).draw();
 
-      const brace = new VF.StaveConnector(treble, bass);
+      var brace = new VF.StaveConnector(staveTreble, staveBass);
       brace.setType(VF.StaveConnector.type.BRACE);
       brace.setContext(ctx).draw();
-      const line = new VF.StaveConnector(treble, bass);
+      var line = new VF.StaveConnector(staveTreble, staveBass);
       line.setType(VF.StaveConnector.type.SINGLE_LEFT);
       line.setContext(ctx).draw();
 
-      const trebleNotes = notes.filter(n => n.staff === 'treble');
-      const bassNotes   = notes.filter(n => n.staff === 'bass');
-      drawVoice(trebleNotes, treble);
-      drawVoice(bassNotes, bass);
+      drawStaffNotes('treble', staveTreble, TREBLE_REF);
+      drawStaffNotes('bass',   staveBass,   BASS_REF);
+
     } catch (e) {
-      showError('drawStaff failed: ' + e.message);
+      showError('drawStaff falhou: ' + e.message);
     }
   }
 
-  function drawVoice(list, stave) {
-    if (list.length === 0) return;
-    const vfNotes = list.map(n => {
-      const sn = new VF.StaveNote({
-        clef: stave.getClef(),
-        keys: [n.letter + '/' + n.octave],
-        duration: n.dur,
-      });
-      if (n.id === selectedId) sn.setStyle({ fillStyle: '#2a6df4', strokeStyle: '#2a6df4' });
-      return sn;
-    });
-
-    const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
-    voice.addTickables(vfNotes);
-
-    const width = stave.getNoteEndX() - stave.getNoteStartX() - 30;
-    new VF.Formatter().joinVoices([voice]).format([voice], width);
-    voice.draw(ctx, stave);
-
-    // record x for hit testing using our own linear model
-    list.forEach((n, i) => { n._x = computeNoteX(stave, list, i); });
+  // Quantos "beats" (em semínimas) cada duração vale
+  function durBeats(d) {
+    return { w: 4, h: 2, q: 1, '8': 0.5 }[d] || 1;
   }
 
-  /* ---------------- hit testing ---------------- */
+  // Divide as notas de um pentagrama em compassos de 4 tempos
+  function splitIntoMeasures(list) {
+    var measures = [];
+    var cur = [];
+    var used = 0;
+    for (var i = 0; i < list.length; i++) {
+      var b = durBeats(list[i].dur);
+      if (used + b > 4 && cur.length > 0) {
+        measures.push(cur);
+        cur = [];
+        used = 0;
+      }
+      cur.push(list[i]);
+      used += b;
+    }
+    measures.push(cur); // último compasso (mesmo vazio)
+    return measures;
+  }
+
+  function drawStaffNotes(staffName, stave, ref) {
+    var list = notes.filter(function (n) { return n.staff === staffName; });
+    if (list.length === 0) return;
+
+    var measures = splitIntoMeasures(list);
+    var x = stave.getNoteStartX();
+    var noteWidthAvail = (stave.getNoteEndX() - stave.getNoteStartX()) - 20;
+
+    // largura por compasso (dividimos o espaço disponível)
+    var perMeasure = noteWidthAvail / Math.max(1, measures.length);
+
+    var allRenderedX = [];
+
+    for (var m = 0; m < measures.length; m++) {
+      var measureNotes = measures[m];
+      var measureX = stave.getNoteStartX() + (perMeasure * m);
+
+      if (measureNotes.length === 0) {
+        // compasso vazio: só desenha a barra no fim
+        drawBarline(stave, stave.getNoteStartX() + perMeasure * (m + 1));
+        continue;
+      }
+
+      var vfNotes = measureNotes.map(function (n) {
+        var sn = new VF.StaveNote({
+          clef: stave.getClef(),
+          keys: [n.letter + '/' + n.octave],
+          duration: n.dur,
+        });
+        if (n.accidental) sn.addModifier(new VF.Accidental(n.accidental), 0);
+        if (n.id === selectedId) sn.setStyle({ fillStyle: '#2a6df4', strokeStyle: '#2a6df4' });
+        return sn;
+      });
+
+      var voice = new VF.Voice({ num_beats: 4, beat_value: 4 })
+        .setMode(VF.Voice.Mode.SOFT);
+      voice.addTickables(vfNotes);
+
+      var availableWidth = perMeasure - 30;
+      new VF.Formatter().joinVoices([voice]).format([voice], availableWidth);
+      voice.draw(ctx, stave);
+
+      // pega as posições REAIS que o VexFlow desenhou
+      vfNotes.forEach(function (vn, i) {
+        var bb = vn.getBoundingBox();
+        var nx = bb.getX() + bb.getW() / 2;
+        measureNotes[i]._x = nx;
+        measureNotes[i]._y = noteY(measureNotes[i], ref);
+        allRenderedX.push(nx);
+      });
+
+      // barra de compasso no fim
+      if (m < measures.length - 1) {
+        drawBarline(stave, measureX + perMeasure);
+      }
+    }
+  }
+
+  function drawBarline(stave, x) {
+    var bar = new VF.Barline(x);
+    bar.setStave(stave);
+    bar.setContext(ctx).draw();
+  }
+
+  function noteY(note, ref) {
+    var topY = note.staff === 'treble' ? TREBLE_TOP : BASS_TOP;
+    var steps = letterOctaveToSteps(ref, note.letter, note.octave);
+    return topY + steps * STEP;
+  }
+
+  /* =========================================================
+     HIT-TEST — usa as coordenadas REAIS que o VexFlow desenhou
+     ========================================================= */
   function pointToStaff(x, y) {
-    const trebleCenter = TREBLE_TOP + LINE_GAP * 2;
-    const bassCenter   = BASS_TOP   + LINE_GAP * 2;
-    const distT = Math.abs(y - trebleCenter);
-    const distB = Math.abs(y - bassCenter);
-    const staff = distT <= distB ? 'treble' : 'bass';
-    const topY  = staff === 'treble' ? TREBLE_TOP : BASS_TOP;
-    const ref   = staff === 'treble' ? TREBLE_REF : BASS_REF;
-    let steps = Math.round((y - topY) / STEP);
-    steps = Math.max(-4, Math.min(14, steps));
-    const { letter, octave } = refToLetterOctave(ref, steps);
-    return { staff, letter, octave, steps };
+    var trebleCenter = TREBLE_TOP + LINE_GAP * 2;
+    var bassCenter   = BASS_TOP   + LINE_GAP * 2;
+    var distT = Math.abs(y - trebleCenter);
+    var distB = Math.abs(y - bassCenter);
+    var staff = distT <= distB ? 'treble' : 'bass';
+    var topY = staff === 'treble' ? TREBLE_TOP : BASS_TOP;
+    var ref  = staff === 'treble' ? TREBLE_REF : BASS_REF;
+
+    var steps = Math.round((y - topY) / STEP);
+    steps = Math.max(-5, Math.min(16, steps));
+    var lo = refToLetterOctave(ref, steps);
+    return { staff: staff, letter: lo.letter, octave: lo.octave, steps: steps };
   }
 
   function findNoteAt(x, y) {
-    let best = null, bestScore = Infinity;
-    for (const n of notes) {
-      if (n._x === undefined) continue;
-      const ref = n.staff === 'treble' ? TREBLE_REF : BASS_REF;
-      const topY = n.staff === 'treble' ? TREBLE_TOP : BASS_TOP;
-      const nSteps = letterOctaveToSteps(ref, n.letter, n.octave);
-      const nY = topY + nSteps * STEP;
-      const dx = Math.abs(n._x - x);
-      const dy = Math.abs(nY - y);
-      if (dx < 26 && dy < 22) {
-        const score = dx + dy;
-        if (score < bestScore) { best = n; bestScore = score; }
+    var best = null;
+    var bestDist = Infinity;
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      if (n._x === undefined || n._y === undefined) continue;
+      var dx = Math.abs(n._x - x);
+      var dy = Math.abs(n._y - y);
+      if (dx < 28 && dy < 24) {
+        var d = dx + dy * 0.6;
+        if (d < bestDist) { best = n; bestDist = d; }
       }
     }
     return best;
   }
 
-  /* ---------------- pointer ---------------- */
-  let drag = null;
+  /* =========================================================
+     POINTER — selecionar, arrastar, criar
+     ========================================================= */
+  var drag = null;
 
   function localXY(e) {
-    const r = staffDiv.getBoundingClientRect();
-    // account for svg scaling (we set width:100%)
-    const scale = STAFF_WIDTH / r.width;
-    return { x: (e.clientX - r.left) * scale, y: (e.clientY - r.top) * scale };
+    var r = staffDiv.getBoundingClientRect();
+    // o SVG tem viewBox, então precisamos converter coordenadas de tela pra SVG
+    var scaleX = STAFF_WIDTH / r.width;
+    var scaleY = HEIGHT / r.height;
+    return {
+      x: (e.clientX - r.left) * scaleX,
+      y: (e.clientY - r.top) * scaleY
+    };
   }
 
-  staffDiv.addEventListener('pointerdown', e => {
+  staffDiv.addEventListener('pointerdown', function (e) {
     e.preventDefault();
-    const { x, y } = localXY(e);
-    const hit = findNoteAt(x, y);
+    var p = localXY(e);
+    var hit = findNoteAt(p.x, p.y);
+
     if (hit) {
       selectedId = hit.id;
-      const ref = hit.staff === 'treble' ? TREBLE_REF : BASS_REF;
-      const topY = hit.staff === 'treble' ? TREBLE_TOP : BASS_TOP;
+      var ref = hit.staff === 'treble' ? TREBLE_REF : BASS_REF;
       drag = {
         note: hit,
-        startY: y,
-        startSteps: letterOctaveToSteps(ref, hit.letter, hit.octave),
-        moved: false,
+        startY: p.y,
+        startSteps: letterOctaveToSteps(ref, hit.letter, hit.octave)
       };
       drawStaff();
       try { staffDiv.setPointerCapture(e.pointerId); } catch (_) {}
     } else {
-      // tap on empty staff -> add a note
-      if (x < 100) return; // ignore clef area
-      const { staff, letter, octave } = pointToStaff(x, y);
-      const nn = { id: nextId++, letter, octave, dur: currentDuration, staff };
+      if (p.x < 110) return; // área da clave
+      var pos = pointToStaff(p.x, p.y);
+      var nn = {
+        id: nextId++,
+        letter: pos.letter,
+        octave: pos.octave,
+        dur: currentDuration,
+        staff: pos.staff,
+        accidental: null
+      };
       notes.push(nn);
       selectedId = nn.id;
       drawStaff();
     }
   }, { passive: false });
 
-  staffDiv.addEventListener('pointermove', e => {
+  staffDiv.addEventListener('pointermove', function (e) {
     if (!drag) return;
     e.preventDefault();
-    const { y } = localXY(e);
-    const deltaSteps = Math.round((y - drag.startY) / STEP);
-    if (deltaSteps !== 0) drag.moved = true;
-    const newSteps = Math.max(-4, Math.min(14, drag.startSteps + deltaSteps));
-    const ref = drag.note.staff === 'treble' ? TREBLE_REF : BASS_REF;
-    const { letter, octave } = refToLetterOctave(ref, newSteps);
-    if (drag.note.letter !== letter || drag.note.octave !== octave) {
-      drag.note.letter = letter;
-      drag.note.octave = octave;
+    var p = localXY(e);
+    var deltaSteps = Math.round((p.y - drag.startY) / STEP);
+    var newSteps = Math.max(-5, Math.min(16, drag.startSteps + deltaSteps));
+    var ref = drag.note.staff === 'treble' ? TREBLE_REF : BASS_REF;
+    var lo = refToLetterOctave(ref, newSteps);
+    if (drag.note.letter !== lo.letter || drag.note.octave !== lo.octave) {
+      drag.note.letter = lo.letter;
+      drag.note.octave = lo.octave;
       drawStaff();
     }
   }, { passive: false });
@@ -324,27 +405,33 @@
   staffDiv.addEventListener('pointerup', endDrag);
   staffDiv.addEventListener('pointercancel', endDrag);
 
-  /* ---------------- durations ---------------- */
-  document.getElementById('durations').addEventListener('click', e => {
-    const btn = e.target.closest('button');
+  /* =========================================================
+     DURAÇÕES
+     ========================================================= */
+  document.getElementById('durations').addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
     if (!btn) return;
     currentDuration = btn.dataset.dur;
-    document.querySelectorAll('#durations button').forEach(b => b.classList.remove('selected'));
+    document.querySelectorAll('#durations button').forEach(function (b) {
+      b.classList.remove('selected');
+    });
     btn.classList.add('selected');
     if (selectedId) {
-      const n = notes.find(n => n.id === selectedId);
+      var n = notes.find(function (n) { return n.id === selectedId; });
       if (n) { n.dur = currentDuration; drawStaff(); }
     }
   });
 
-  document.getElementById('clearBtn').addEventListener('click', () => {
+  document.getElementById('clearBtn').addEventListener('click', function () {
     notes = []; selectedId = null; drawStaff();
   });
 
-  /* ---------------- audio ---------------- */
-  let sampler = null;
+  /* =========================================================
+     ÁUDIO — piano acústico amostrado
+     ========================================================= */
+  var sampler = null;
 
-  const PIANO_SAMPLES = {
+  var PIANO_SAMPLES = {
     'A0':'A0.mp3','C1':'C1.mp3','D#1':'Ds1.mp3','F#1':'Fs1.mp3',
     'A1':'A1.mp3','C2':'C2.mp3','D#2':'Ds2.mp3','F#2':'Fs2.mp3',
     'A2':'A2.mp3','C3':'C3.mp3','D#3':'Ds3.mp3','F#3':'Fs3.mp3',
@@ -354,114 +441,141 @@
     'A6':'A6.mp3','C7':'C7.mp3','D#7':'Ds7.mp3','F#7':'Fs7.mp3',
     'A7':'A7.mp3','C8':'C8.mp3'
   };
-  const SAMPLE_BASE = 'https://tonejs.github.io/audio/salamander/';
+  var SAMPLE_BASE = 'https://tonejs.github.io/audio/salamander/';
 
   async function ensureSampler() {
     if (sampler) return sampler;
-    if (typeof Tone === 'undefined') throw new Error('Tone.js not loaded');
-    const urls = {};
-    for (const [k, v] of Object.entries(PIANO_SAMPLES)) urls[k] = SAMPLE_BASE + v;
-    sampler = new Tone.Sampler({ urls, release: 1 }).toDestination();
+    if (typeof Tone === 'undefined') throw new Error('Tone.js não carregou');
+    var urls = {};
+    Object.keys(PIANO_SAMPLES).forEach(function (k) {
+      urls[k] = SAMPLE_BASE + PIANO_SAMPLES[k];
+    });
+    sampler = new Tone.Sampler({ urls: urls, release: 1 }).toDestination();
     await Tone.loaded();
     return sampler;
   }
 
-  const BPM = 90;
-  const beatSec = 60 / BPM;
+  function pitchName(letter, accidental, octave) {
+    var n = letter.toUpperCase();
+    if (accidental === '#') n += '#';
+    else if (accidental === 'b') n += 'b';
+    return n + octave;
+  }
+
+  var BPM = 90;
+  var beatSec = 60 / BPM;
   function durSec(d) {
     return { w: beatSec*4, h: beatSec*2, q: beatSec, '8': beatSec/2 }[d] || beatSec;
   }
 
-  document.getElementById('playBtn').addEventListener('click', async () => {
+  document.getElementById('playBtn').addEventListener('click', async function () {
     if (notes.length === 0) return;
     try {
       await Tone.start();
       await ensureSampler();
-      // playback follows visual left-to-right order across both staves combined,
-      // approximated by sorting on _x then staff (treble first for ties)
-      const seq = notes.slice().sort((a, b) => {
-        if (a._x !== undefined && b._x !== undefined && Math.abs(a._x - b._x) > 4) return a._x - b._x;
+
+      // toca na ordem da esquerda pra direita, treble depois bass em empate
+      var seq = notes.slice().sort(function (a, b) {
+        if (a._x !== undefined && b._x !== undefined && Math.abs(a._x - b._x) > 4) {
+          return a._x - b._x;
+        }
         return a.id - b.id;
       });
-      let t = Tone.now() + 0.15;
-      for (const n of seq) {
-        const pitch = n.letter.toUpperCase() + n.octave;
-        const d = durSec(n.dur);
-        sampler.triggerAttackRelease(pitch, d * 0.95, t);
+
+      var t = Tone.now() + 0.15;
+      for (var i = 0; i < seq.length; i++) {
+        var n = seq[i];
+        var d = durSec(n.dur);
+        try {
+          sampler.triggerAttackRelease(pitchName(n.letter, n.accidental, n.octave), d * 0.95, t);
+        } catch (err) { /* ignora nota fora do alcance */ }
         t += d;
       }
     } catch (e) {
-      showError('Play failed: ' + e.message);
+      showError('Play falhou: ' + e.message);
     }
   });
 
-  /* ---------------- export MusicXML ---------------- */
+  /* =========================================================
+     EXPORT MUSICXML
+     ========================================================= */
   function exportMusicXML() {
-    const div = 4;
-    const durDiv = d => ({ w: div*4, h: div*2, q: div, '8': div/2 }[d] || div);
-    const typeFor = d => ({ w:'whole', h:'half', q:'quarter', '8':'eighth' }[d] || 'quarter');
+    var div = 4;
+    function durDiv(d) { return { w:div*4, h:div*2, q:div, '8':div/2 }[d] || div; }
+    function typeFor(d) { return { w:'whole', h:'half', q:'quarter', '8':'eighth' }[d] || 'quarter'; }
 
-    const parts = ['treble','bass'].map((staffName, i) => {
-      const partId = 'P' + (i + 1);
-      const clefSign = staffName === 'treble' ? 'G' : 'F';
-      const clefLine = staffName === 'treble' ? 2 : 4;
-      const list = notes.filter(n => n.staff === staffName);
-      const cap = div * 4;
-      const measures = [];
-      let cur = [], used = 0;
-      for (const n of list) {
-        const d = durDiv(n.dur);
+    var parts = ['treble','bass'].map(function (staffName, i) {
+      var partId = 'P' + (i + 1);
+      var clefSign = staffName === 'treble' ? 'G' : 'F';
+      var clefLine = staffName === 'treble' ? 2 : 4;
+      var list = notes.filter(function (n) { return n.staff === staffName; });
+
+      var measures = [];
+      var cur = [], used = 0;
+      var cap = div * 4;
+      for (var j = 0; j < list.length; j++) {
+        var d = durDiv(list[j].dur);
         if (used + d > cap && cur.length) { measures.push(cur); cur = []; used = 0; }
-        cur.push(n); used += d;
+        cur.push(list[j]); used += d;
       }
       if (cur.length || measures.length === 0) measures.push(cur);
 
-      const body = measures.map((mNotes, mi) => {
-        const attrs = mi === 0 ? `<attributes><divisions>${div}</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>${clefSign}</sign><line>${clefLine}</line></clef></attributes>` : '';
-        const ns = mNotes.map(n => `<note><pitch><step>${n.letter.toUpperCase()}</step><octave>${n.octave}</octave></pitch><duration>${durDiv(n.dur)}</duration><type>${typeFor(n.dur)}</type></note>`).join('');
-        const usedD = mNotes.reduce((s, n) => s + durDiv(n.dur), 0);
-        const rest = cap - usedD;
-        const restXML = rest > 0 ? `<note><rest/><duration>${rest}</duration><type>whole</type></note>` : '';
-        return `<measure number="${mi + 1}">${attrs}${ns}${restXML}</measure>`;
+      var body = measures.map(function (mNotes, mi) {
+        var attrs = mi === 0
+          ? '<attributes><divisions>'+div+'</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>'+clefSign+'</sign><line>'+clefLine+'</line></clef></attributes>'
+          : '';
+        var ns = mNotes.map(function (n) {
+          var alter = n.accidental === '#' ? 1 : (n.accidental === 'b' ? -1 : 0);
+          return '<note><pitch><step>'+n.letter.toUpperCase()+'</step><alter>'+alter+'</alter><octave>'+n.octave+'</octave></pitch><duration>'+durDiv(n.dur)+'</duration><type>'+typeFor(n.dur)+'</type></note>';
+        }).join('');
+        var usedD = mNotes.reduce(function (s, n) { return s + durDiv(n.dur); }, 0);
+        var rest = cap - usedD;
+        var restXML = rest > 0 ? '<note><rest/><duration>'+rest+'</duration><type>whole</type></note>' : '';
+        return '<measure number="'+(mi+1)+'">'+attrs+ns+restXML+'</measure>';
       }).join('');
 
-      return `<part id="${partId}">${body}</part>`;
+      return '<part id="'+partId+'">'+body+'</part>';
     }).join('');
 
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
-<score-partwise version="3.1">
-<part-list>
-<score-part id="P1"><part-name>Treble</part-name></score-part>
-<score-part id="P2"><part-name>Bass</part-name></score-part>
-</part-list>
-${parts}
-</score-partwise>`;
+    var xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+      + '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n'
+      + '<score-partwise version="3.1">\n'
+      + '<part-list>'
+      + '<score-part id="P1"><part-name>Treble</part-name></score-part>'
+      + '<score-part id="P2"><part-name>Bass</part-name></score-part>'
+      + '</part-list>\n'
+      + parts + '\n</score-partwise>';
 
-    const blob = new Blob([xml], { type: 'application/vnd.recordare.musicxml+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    var blob = new Blob([xml], { type: 'application/vnd.recordare.musicxml+xml' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
     a.href = url; a.download = 'musicpad.musicxml';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   }
   document.getElementById('exportBtn').addEventListener('click', exportMusicXML);
 
-  /* ---------------- boot ---------------- */
+  /* =========================================================
+     BOOT
+     ========================================================= */
   function boot() {
-    // wait one frame so layout settles on iOS Safari
-    requestAnimationFrame(() => {
+    requestAnimationFrame(function () {
       try {
         buildRenderer();
         drawStaff();
       } catch (e) {
-        showError('Init failed: ' + e.message);
+        showError('Init falhou: ' + e.message);
       }
     });
   }
 
-  // also rebuild on orientation change so staff fits
-  window.addEventListener('orientationchange', () => setTimeout(() => { buildRenderer(); drawStaff(); }, 300));
+  window.addEventListener('orientationchange', function () {
+    setTimeout(function () { buildRenderer(); drawStaff(); }, 300);
+  });
+  window.addEventListener('resize', function () {
+    clearTimeout(window._rz);
+    window._rz = setTimeout(function () { buildRenderer(); drawStaff(); }, 200);
+  });
 
   if (document.readyState === 'complete' || document.readyState === 'interactive') boot();
   else window.addEventListener('DOMContentLoaded', boot);
